@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exported data files (don't commit personal session data)
+melody-explorer-*.json
+
+# Node (if ever used for tooling)
+node_modules/
+npm-debug.log
