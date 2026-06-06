@@ -734,7 +734,17 @@
   }
 
   /* ─── State ─────────────────────────────────────────────────────────── */
+  const LS_SAVED_MELODIES_KEY = 'melodyExplorer_savedMelodies';
   let savedMelodies = [];
+  try {
+    const fromStorage = localStorage.getItem(LS_SAVED_MELODIES_KEY);
+    if (fromStorage) {
+      savedMelodies = JSON.parse(fromStorage);
+    }
+  } catch (e) {
+    console.warn("Could not load saved melodies from localStorage:", e);
+  }
+
   let currentMelody = null; // { freqs, durations, stateString }
   let isPlaying = false;
   let stopRequested = false;
@@ -1117,8 +1127,10 @@
   // Reflect the current state into the address bar without reloading.
   function updateURLState() {
     try {
-      const url = '?state=' + encodeURIComponent(encodeState());
+      const stateStr = encodeState();
+      const url = '?state=' + encodeURIComponent(stateStr);
       history.replaceState(null, '', url);
+      document.title = stateStr + " — Melody Explorer";
     } catch (e) { /* non-browser / sandboxed: ignore */ }
   }
 
@@ -1318,6 +1330,11 @@
       timestamp: new Date().toISOString()
     };
     savedMelodies.unshift(entry);
+    try {
+      localStorage.setItem(LS_SAVED_MELODIES_KEY, JSON.stringify(savedMelodies));
+    } catch (e) {
+      console.warn("Could not save melodies to localStorage:", e);
+    }
     hideRatingSection();
     statusEl.textContent = `✅ Saved! Rating: ${rating}/10. Play another?`;
     currentMelody = null;
@@ -1424,6 +1441,7 @@
   updateSliderStyle();
   if (sharedLoaded) {
     statusEl.textContent = '🔗 Shared melody loaded — hit ▶ Play State String to hear it.';
+    document.title = initialURLState + " — Melody Explorer";
   }
 
   /* ─── Keyboard shortcuts ─────────────────────────────────────────────── */
