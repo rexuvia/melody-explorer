@@ -640,6 +640,7 @@
           <th>State String</th>
           <th>Frequencies (Hz)</th>
           <th>Play</th>
+          <th>Load</th>
         </tr>
       </thead>
       <tbody id="history-body"></tbody>
@@ -1392,21 +1393,39 @@
       buildPills(currentMelody.freqs);
     }
     const rating = parseInt(ratingSlider.value, 10);
-    const entry = {
-      id: savedMelodies.length + 1,
-      rating,
-      stateString: currentMelody.stateString,
-      freqs: currentMelody.freqs,
-      timestamp: new Date().toISOString()
-    };
-    savedMelodies.unshift(entry);
+    const savedString = currentMelody.stateString;
+
+    // If a melody with the EXACT same state string is already saved, update
+    // that existing entry's rating + timestamp (and bump it to the top)
+    // rather than creating a duplicate row.
+    const existingIdx = savedMelodies.findIndex(
+      (m) => m.stateString === currentMelody.stateString
+    );
+    if (existingIdx !== -1) {
+      const existing = savedMelodies[existingIdx];
+      existing.rating = rating;
+      existing.freqs = currentMelody.freqs;
+      existing.timestamp = new Date().toISOString();
+      // Bump to the top so the most recently rated melody is most visible.
+      savedMelodies.splice(existingIdx, 1);
+      savedMelodies.unshift(existing);
+      statusEl.textContent = `✅ Updated ${savedString} → ${rating}/10. New melody ready below.`;
+    } else {
+      const entry = {
+        id: savedMelodies.length + 1,
+        rating,
+        stateString: currentMelody.stateString,
+        freqs: currentMelody.freqs,
+        timestamp: new Date().toISOString()
+      };
+      savedMelodies.unshift(entry);
+      statusEl.textContent = `✅ Saved ${savedString} @ ${rating}/10. New melody ready below.`;
+    }
     try {
       localStorage.setItem(LS_SAVED_MELODIES_KEY, JSON.stringify(savedMelodies));
     } catch (e) {
       console.warn("Could not save melodies to localStorage:", e);
     }
-    const savedString = currentMelody.stateString;
-    statusEl.textContent = `✅ Saved ${savedString} @ ${rating}/10. New melody ready below.`;
     renderTable();
     btnExport.disabled = false;
 
@@ -1471,6 +1490,35 @@
         if(!stopRequested) statusEl.textContent = 'Replay done.';
       });
 
+      // Load/Edit button — pulls this row's params into the main UI sliders,
+      // refreshes the component state and reflects its saved rating, WITHOUT
+      // auto-playing the audio. Lets the user re-rate or tweak parameters.
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'btn-play-row';
+      loadBtn.textContent = '✎ Load';
+      loadBtn.title = 'Load this melody into the editor (no playback)';
+      loadBtn.style.fontSize = '0.75rem';
+      loadBtn.addEventListener('click', () => {
+        // Bring the saved parameter state into the main UI sliders.
+        if (!loadStateString(entry.stateString)) return;
+        // Refresh the current melody object so Replay/Save target this one.
+        currentMelody = generateMelody();
+        buildPills(currentMelody.freqs);
+        // Reflect the existing saved rating on the slider so the user sees it.
+        const r = parseInt(entry.rating, 10);
+        if (!isNaN(r)) {
+          ratingSlider.value = r;
+          ratingDisplay.textContent = `${r} / 10`;
+          updateSliderStyle();
+        }
+        updateRatingPreview();
+        statusEl.textContent = `✎ Loaded ${entry.stateString} @ ${entry.rating}/10 — edit params or re-rate, then Save.`;
+        // Bring the editor into view on mobile.
+        if (playCard && playCard.scrollIntoView) {
+          playCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+
       const color = ratingColor(entry.rating);
       tr.innerHTML = `
         <td>${entry.id}</td>
@@ -1478,8 +1526,10 @@
         <td><span style="font-family:monospace; color:var(--muted)">${entry.stateString}</span></td>
         <td><span class="hz-list">${entry.freqs.join(', ')}</span></td>
         <td></td>
+        <td></td>
       `;
       tr.cells[4].appendChild(playBtn);
+      tr.cells[5].appendChild(loadBtn);
       historyBody.appendChild(tr);
     });
   }
@@ -1512,6 +1562,20 @@
   initSeqSliders();
   renderTable();
   updateSliderStyle();
+
+  // Generate an initial melody right away so the rating component always has
+  // a concrete target the moment the page loads — no need to press Play /
+  // Generate first. Rating (sliders, number keys, Save) works immediately and
+  // is fully decoupled from playback state.
+  if (!currentMelody) {
+    try {
+      currentMelody = generateMelody();
+      buildPills(currentMelody.freqs);
+    } catch (e) {
+      console.warn('Could not generate initial melody:', e);
+    }
+  }
+
   if (sharedLoaded) {
     statusEl.textContent = '🔗 Shared melody loaded — hit ▶ Play State String to hear it.';
     document.title = initialURLState + " — Melody Explorer";
