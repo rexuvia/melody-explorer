@@ -516,6 +516,63 @@
       margin-top: 1rem;
     }
 
+    /* ── Keyboard hints ──────────────────────────────────────────────── */
+    #keyboard-hints {
+      width: 100%;
+      max-width: 640px;
+      margin-bottom: 1.25rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem 1.5rem;
+      box-shadow: 0 0 30px #c000ff18;
+    }
+
+    #keyboard-hints h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      margin-bottom: 0.8rem;
+      text-shadow: var(--glow2);
+    }
+
+    #keyboard-hints ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 0.5rem;
+    }
+
+    #keyboard-hints li {
+      font-size: 0.88rem;
+      color: var(--text);
+      margin-bottom: 0.4rem;
+      line-height: 1.5;
+    }
+
+    #keyboard-hints kbd {
+      display: inline-block;
+      padding: 0.12rem 0.5rem;
+      border-radius: 4px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      color: var(--accent2);
+      font-family: monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      min-width: 1.6em;
+      text-align: center;
+      box-shadow: 0 1px 2px #0008;
+    }
+
+    #keyboard-hints .hint-note {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 0;
+      font-style: italic;
+    }
+
     /* ── Footer ─────────────────────────────────────────────────────── */
     footer {
       margin-top: 3rem;
@@ -932,6 +989,7 @@
   let stopRequested = false;
   let playPromiseResolve = null; // resolver for the active playMelody() Promise (used by stopAudio)
   let audioCtx = null;
+  let hasPlayedFull = false; // true once the current melody has been heard in its entirety at least once
 
   /* ─── DOM refs ───────────────────────────────────────────────────────── */
   const btnPlay          = document.getElementById('btn-play');
@@ -1186,6 +1244,8 @@
           return;
         }
         setPillState(melody.freqs.length - 1, 'done');
+        // Mark that the melody has been heard in full at least once.
+        hasPlayedFull = true;
         if (loopMelodyCb && loopMelodyCb.checked && currentMelody === melody && !stopRequested && isPlaying) {
           playMelody(melody).then(finish);
         } else {
@@ -1193,6 +1253,12 @@
         }
       }, totalMs - baseDurSec * 500);
     });
+  }
+
+  /* ─── Mobile detection helper (used for showing keyboard hints) ────── */
+  function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 1024);
   }
 
   /* ─── UI state machine ───────────────────────────────────────────────── */
@@ -1458,6 +1524,7 @@
 
     currentMelody = generateMelody();
     buildPills(currentMelody.freqs);
+    hasPlayedFull = false; // reset for the new melody
     setPlaying(true, btnPlay, '✨ Generate New Random Melody');
     statusEl.textContent = '🎶 Playing…  ' + currentMelody.stateString;
     await playMelody(currentMelody);
@@ -1490,6 +1557,7 @@
     hideRatingSection();
     currentMelody = generateMelody();
     buildPills(currentMelody.freqs);
+    hasPlayedFull = false; // reset for the new melody
     setPlaying(true, btnPlayState, '▶ Play State String');
     statusEl.textContent = '🎶 Playing…  ' + currentMelody.stateString;
     await playMelody(currentMelody);
@@ -1589,9 +1657,15 @@
     // Refresh the currently-displayed melody so Replay etc. uses the new one.
     currentMelody = generateMelody();
     buildPills(currentMelody.freqs);
+    hasPlayedFull = false; // new melody hasn't been heard yet
   }
 
   btnSave.addEventListener('click', () => {
+    // Ratings are only accepted after the melody has been heard in full.
+    if (!hasPlayedFull) {
+      statusEl.textContent = '⚠️ Listen to the full melody at least once before saving a rating.';
+      return;
+    }
     // Make sure the params reflect the latest slider / state-input values.
     syncParamsFromSliders();
     // If no melody object exists, derive one from current params so the
@@ -1794,29 +1868,63 @@
 
   /* ─── Keyboard shortcuts ─────────────────────────────────────────────── */
   window.addEventListener('keydown', (e) => {
-    // Number keys set a rating directly. The rating section is always
-    // visible now, so we only block while a melody is currently playing
-    // or when the user is typing in an input field.
-    if (isPlaying) return;
+    // Skip shortcuts when the user is typing in a form field.
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    const num = parseInt(e.key, 10);
-    if (!isNaN(num) && num >= 1 && num <= 9) {
-      ratingSlider.value = num;
-      ratingDisplay.textContent = `${num} / 10`;
-      updateSliderStyle();
-      if (document.getElementById('auto-start') && document.getElementById('auto-start').checked) {
-        btnSave.click();
+
+    // Enter key: generate a new random state string WITHOUT rating.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isPlaying) {
+        stopAudio();
+        setPlaying(false);
       }
-    } else if (e.key === '0') {
-      ratingSlider.value = 10;
-      ratingDisplay.textContent = '10 / 10';
+      rollNewState();
+      resetRatingSlider();
+      updateRatingPreview();
+      statusEl.textContent = '🎲 New melody generated — press Play or a number key after listening.';
+      return;
+    }
+
+    // Number keys 1-9 → rating 1-9, 0 → rating 10.
+    // Keys work regardless of play state, but the rating is only
+    // accepted (saved) if the melody has been heard in full at least once.
+    const num = parseInt(e.key, 10);
+    const rating = (e.key === '0') ? 10 : ((!isNaN(num) && num >= 1 && num <= 9) ? num : null);
+    if (rating !== null) {
+      // Always update the slider visually so the user sees their choice.
+      ratingSlider.value = rating;
+      ratingDisplay.textContent = `${rating} / 10`;
       updateSliderStyle();
+
+      if (!hasPlayedFull) {
+        statusEl.textContent = '⚠️ Listen to the full melody at least once before rating.';
+        return;
+      }
+
+      // Auto-save when enabled, otherwise just set the slider.
       if (document.getElementById('auto-start') && document.getElementById('auto-start').checked) {
         btnSave.click();
       }
     }
   });
+
+  /* ─── Keyboard shortcut hints (non-mobile only) ──────────────────────── */
+  (function initKeyboardHints() {
+    if (isMobileDevice()) return;
+    const hint = document.createElement('div');
+    hint.id = 'keyboard-hints';
+    hint.innerHTML = `
+      <h2>⌨ Keyboard Shortcuts</h2>
+      <ul>
+        <li><kbd>1</kbd>–<kbd>9</kbd> &nbsp;Rate melody 1–9 &nbsp;·&nbsp; <kbd>0</kbd> = 10/10</li>
+        <li><kbd>Enter</kbd> &nbsp;Generate a new random melody (without rating)</li>
+      </ul>
+      <p class="hint-note">Number-key ratings are only accepted after the melody has played in full at least once.</p>
+    `;
+    // Insert after the rating section.
+    ratingSection.insertAdjacentElement('afterend', hint);
+  })();
 
 </script>
 </body>
